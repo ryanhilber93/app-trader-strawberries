@@ -48,4 +48,22 @@ FROM
 	WHERE rating IS NOT NULL) AS c
 ORDER BY expected_profit DESC, c.review_count DESC;
 */
+
 -- compare based on content rating (1b from slides)
+-- app store
+
+SELECT content_rating, COUNT(content_rating), AVG(
+CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+ELSE 1500*(12*(1+2*rating)) - 10000 * price END) as avg_expected_profit
+FROM app_store_apps
+GROUP BY content_rating
+ORDER BY avg_expected_profit DESC;
+
+-- google store
+SELECT content_rating, COUNT(content_rating), AVG(
+CASE WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) < 1 THEN 1500*(12*(1+2*CAST(rating AS numeric))) - 10000
+WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) >= 1 THEN 1500*(12*(1+2*CAST(rating AS numeric))) - 10000 * CAST(TRIM(REPLACE(price, '$', '')) AS numeric) END) as avg_expected_profit
+FROM play_store_apps
+GROUP BY content_rating
+ORDER BY avg_expected_profit DESC;
+
