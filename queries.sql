@@ -78,6 +78,12 @@ SELECT content_rating, COUNT(content_rating), AVG(rating) AS avg_rating, AVG(
 CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
 ELSE 1500*(12*(1+2*rating)) - 10000 * price END) as avg_expected_profit
 FROM app_store_apps
+WHERE name IN 
+	(SELECT name
+	FROM app_store_apps
+	INTERSECT
+	SELECT name
+	FROM play_store_apps)
 GROUP BY content_rating
 ORDER BY avg_expected_profit DESC;
 
@@ -86,6 +92,12 @@ SELECT content_rating, COUNT(content_rating), AVG(rating), AVG(
 CASE WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) < 1 THEN 1500*(12*(1+2*CAST(rating AS numeric))) - 10000
 WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) >= 1 THEN 1500*(12*(1+2*CAST(rating AS numeric))) - 10000 * CAST(TRIM(REPLACE(price, '$', '')) AS numeric) END) as avg_expected_profit
 FROM play_store_apps
+WHERE name IN 
+	(SELECT name
+	FROM app_store_apps
+	INTERSECT
+	SELECT name
+	FROM play_store_apps)
 GROUP BY content_rating
 ORDER BY avg_expected_profit DESC;
 
@@ -162,19 +174,192 @@ Cost = (app store cost) + (play store cost) + 1000m.max
 m is calculated same as previous analysis but can be different between google and apple
 */
 
-SELECT a.name, (CAST(a.review_count AS numeric) + p.review_count) AS total_review_count,
-2500*(12*(1+2*a.rating)) + 2500*(12*(1+2*ROUND(2 * p.rating / 2))) AS total_revenue,
-	CASE WHEN a.price < 1 THEN 10000 ELSE 10000 * a.price +
-	CASE WHEN p.price < 1 THEN 10000 ELSE 10000 * p.price +
-	(1000 * 
-	CASE WHEN 12*(1+2*a.rating) > 12*(1+2*ROUND(2 * p.rating / 2)) THEN 12*(1+2*a.rating)
-	ELSE 12*(1+2*ROUND(2 * p.rating / 2)) END) AS total_cost,
-total_revenue - total_cost AS total_profit
+SELECT DISTINCT a.name, (CAST(a.review_count AS numeric) + p.review_count) AS total_review_count,
+(2500*(12*(1+2*a.rating)) + 2500*(12*(1+2*ROUND(2 * p.rating) / 2))) -
+	CASE WHEN a.price < 1 THEN 10000 ELSE 10000 * a.price END -
+	CASE WHEN CAST(TRIM(REPLACE(p.price, '$', '')) AS numeric) < 1 THEN 10000 ELSE 10000 * CAST(TRIM(REPLACE(p.price, '$', '')) AS numeric) END -
+	1000 * 
+	CASE WHEN 12*(1+2*a.rating) > 12*(1+2*ROUND(2 * p.rating) / 2) THEN 12*(1+2*a.rating)
+	ELSE 12*(1+2*ROUND(2 * p.rating) / 2) END AS total_expected_profit
 FROM app_store_apps AS a
 INNER JOIN play_store_apps AS p
 ON a.name = p.name
+ORDER BY total_expected_profit DESC, total_review_count DESC;
 
-SELECT a.name, (CAST(a.review_count AS numeric) + p.review_count) AS total_review_count
+SELECT * FROM play_store_apps
+WHERE name = 'ASOS'
+
+SELECT DISTINCT a.name, a.primary_genre, p.genres, (CAST(a.review_count AS numeric) + p.review_count) AS total_review_count,
+(2500*(12*(1+2*a.rating)) + 2500*(12*(1+2*ROUND(2 * p.rating) / 2))) -
+	CASE WHEN a.price < 1 THEN 10000 ELSE 10000 * a.price END -
+	CASE WHEN CAST(TRIM(REPLACE(p.price, '$', '')) AS numeric) < 1 THEN 10000 ELSE 10000 * CAST(TRIM(REPLACE(p.price, '$', '')) AS numeric) END -
+	1000 * 
+	CASE WHEN 12*(1+2*a.rating) > 12*(1+2*ROUND(2 * p.rating) / 2) THEN 12*(1+2*a.rating)
+	ELSE 12*(1+2*ROUND(2 * p.rating) / 2) END AS total_expected_profit
 FROM app_store_apps AS a
 INNER JOIN play_store_apps AS p
 ON a.name = p.name
+ORDER BY total_expected_profit DESC, total_review_count DESC;
+
+--Joshua's formula with a CTE:
+WITH a AS(
+	SELECT name,
+			price,
+			rating,
+			primary_genre AS genre,
+			CAST(review_count AS int) AS review_count,
+			CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+			ELSE 1500*(12*(1+2*rating)) - 10000 * price END AS expected_profit
+	FROM app_store_apps
+	),
+p AS(
+	SELECT c.name AS name,
+			c.clean_price AS price,
+			c.clean_rating AS rating,
+			c.genres AS genre,
+			c.review_count AS review_count,
+			CASE WHEN c.clean_price < 1 THEN 1500*(12*(1+2*c.clean_rating)) - 10000 
+			ELSE 1500*(12*(1+2*c.clean_rating)) - 10000 * c.clean_price
+			END as expected_profit
+	FROM
+		(SELECT name,
+	 			CAST(TRIM(REPLACE(price, '$', '')) AS numeric(5,2)) AS clean_price,
+	 			COALESCE(ROUND(ROUND(2*rating,0)/2,1),0) AS clean_rating,
+		 		genres,
+	 			review_count
+		FROM play_store_apps
+		) AS c
+	)
+SELECT a.name,
+		a.expected_profit + p.expected_profit + 1000*(12*(1+2*least(a.rating,p.rating))) AS total_exp_profit
+FROM a
+INNER JOIN p
+USING (name)
+ORDER BY total_exp_profit DESC;
+
+--Find best apps in each content rating
+--apple:
+SELECT content_rating, name, RANK() OVER(PARTITION BY content_rating ORDER BY
+CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+ELSE 1500*(12*(1+2*rating)) - 10000 * price END) as max_expected_profit
+FROM app_store_apps
+WHERE name IN 
+	(SELECT name
+	FROM app_store_apps
+	INTERSECT
+	SELECT name
+	FROM play_store_apps)
+GROUP BY content_rating, name
+ORDER BY max_expected_profit DESC;
+
+WITH p AS(
+	SELECT name, content_rating,
+	CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+	ELSE 1500*(12*(1+2*rating)) - 10000 * price END as expected_profit
+	FROM app_store_apps
+	WHERE name IN 
+		(SELECT name
+		FROM app_store_apps
+		INTERSECT
+		SELECT name
+		FROM play_store_apps)
+	ORDER BY expected_profit DESC)
+SELECT name, content_rating, expected_profit, ROW_NUMBER() OVER(PARTITION BY content_rating ORDER BY expected_profit DESC) AS profit_rank
+FROM p
+GROUP BY name, content_rating, expected_profit
+
+--one that works:
+WITH p AS(
+	SELECT name, content_rating, review_count,
+	CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+	ELSE 1500*(12*(1+2*rating)) - 10000 * price END as expected_profit
+	FROM app_store_apps
+	WHERE name IN 
+		(SELECT name
+		FROM app_store_apps
+		INTERSECT
+		SELECT name
+		FROM play_store_apps)
+	ORDER BY expected_profit DESC),
+r AS(
+	SELECT name, content_rating, expected_profit, ROW_NUMBER() OVER(PARTITION BY content_rating ORDER BY expected_profit DESC) AS profit_rank
+	FROM p
+	GROUP BY name, content_rating, expected_profit)
+SELECT p.name, p.content_rating, r.expected_profit, r.profit_rank, p.review_count
+FROM p
+INNER JOIN r
+ON p.name = r.name
+WHERE profit_rank <=3
+ORDER BY content_rating, profit_rank;
+
+--recreate for play
+WITH p AS(
+	SELECT name, content_rating,
+	CASE WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) < 1 THEN 1500*(12*(1+2*CAST(ROUND(2 * rating) / 2 AS numeric))) - 10000
+	WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) >= 1 THEN 1500*(12*(1+2*CAST(ROUND(2 * rating) / 2 AS numeric))) - 10000 * CAST(TRIM(REPLACE(price, '$', '')) AS numeric) END as expected_profit
+	FROM play_store_apps
+	WHERE name IN 
+		(SELECT name
+		FROM app_store_apps
+		INTERSECT
+		SELECT name
+		FROM play_store_apps)
+	ORDER BY expected_profit DESC),
+r AS(
+	SELECT name, content_rating, expected_profit, ROW_NUMBER() OVER(PARTITION BY content_rating ORDER BY expected_profit DESC) AS profit_rank
+	FROM p
+	GROUP BY name, content_rating, expected_profit)
+SELECT p.name, p.content_rating, r.expected_profit, r.profit_rank
+FROM p
+INNER JOIN r
+ON p.name = r.name
+WHERE profit_rank <=3
+ORDER BY content_rating, profit_rank;
+
+--one that works: GO BACK AND ADD REVIEW COUNT AS SECONDARY ORDER BY
+WITH p AS(
+	SELECT name, content_rating, review_count,
+	CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+	ELSE 1500*(12*(1+2*rating)) - 10000 * price END as expected_profit
+	FROM app_store_apps
+	WHERE name IN 
+		(SELECT name
+		FROM app_store_apps
+		INTERSECT
+		SELECT name
+		FROM play_store_apps)
+	ORDER BY expected_profit DESC),
+r AS(
+	SELECT name, content_rating, expected_profit, review_count, ROW_NUMBER() OVER(PARTITION BY content_rating ORDER BY expected_profit DESC, review_count DESC) AS profit_rank
+	FROM p
+	GROUP BY name, content_rating, expected_profit, review_count)
+SELECT p.name, p.content_rating, r.expected_profit, r.profit_rank, p.review_count
+FROM p
+INNER JOIN r
+ON p.name = r.name
+WHERE profit_rank <=3
+ORDER BY content_rating, profit_rank, review_count DESC;
+
+--recreate for play
+WITH p AS(
+	SELECT name, content_rating,
+	CASE WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) < 1 THEN 1500*(12*(1+2*CAST(ROUND(2 * rating) / 2 AS numeric))) - 10000
+	WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) >= 1 THEN 1500*(12*(1+2*CAST(ROUND(2 * rating) / 2 AS numeric))) - 10000 * CAST(TRIM(REPLACE(price, '$', '')) AS numeric) END as expected_profit
+	FROM play_store_apps
+	WHERE name IN 
+		(SELECT name
+		FROM app_store_apps
+		INTERSECT
+		SELECT name
+		FROM play_store_apps)
+	ORDER BY expected_profit DESC),
+r AS(
+	SELECT name, content_rating, expected_profit, ROW_NUMBER() OVER(PARTITION BY content_rating ORDER BY expected_profit DESC) AS profit_rank
+	FROM p
+	GROUP BY name, content_rating, expected_profit)
+SELECT p.name, p.content_rating, r.expected_profit, r.profit_rank
+FROM p
+INNER JOIN r
+ON p.name = r.name
+WHERE profit_rank <=3
+ORDER BY content_rating, profit_rank;
