@@ -3,7 +3,7 @@ from app_store_apps;
 select *
 from play_store_apps;
 
-
+***********
 
 
 select ap.name, ap.price,pl.name,pl.price
@@ -88,4 +88,46 @@ on a.name = b.name
 group by a.name,a.review_count::int,a.rating
 ORDER BY /*b.install_count desc,*/a.review_count::int desc, max_review_count desc,a.rating desc
  limit 10;
-*********
+*********Teng *****
+WITH top_genres(genre_name,store,expected_profit) AS
+(
+	SELECT primary_genre, 'Apple Store' AS store,
+		SUM (CASE 
+			WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+			ELSE 1500*(12*(1+2*rating)) - 10000 * price 
+		END) as expected_profit
+	FROM app_store_apps
+	GROUP BY primary_genre
+	UNION
+	SELECT genres, 'Google Play' AS store,
+		SUM(CASE 
+			WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) < 1 THEN 1500*(12*(1+2*CAST(rating AS numeric))) - 10000
+			WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) >= 1 THEN 1500*(12*(1+2*CAST(rating AS numeric))) - 10000 * CAST(TRIM(REPLACE(price, '$', '')) AS numeric) 
+		END) as expected_profit
+	FROM play_store_apps
+	WHERE rating IS NOT null
+	GROUP BY genres
+	ORDER BY expected_profit DESC
+	LIMIT 10)
+
+SELECT distinct a.name, a.primary_genre,
+	CASE WHEN a.price < 1 THEN 1500*(12*(1+2*a.rating)) - 10000 
+	ELSE 1500*(12*(1+2*a.rating)) - 10000 * a.price END as expected_profit
+FROM app_store_apps AS a
+INNER JOIN play_store_apps AS p
+USING(name)
+WHERE primary_genre IN;
+**********************************Ryan  ****
+SELECT DISTINCT a.name, (CAST(a.review_count AS numeric) + p.review_count) AS total_review_count,
+
+(2500*(12*(1+2*a.rating)) + 2500*(12*(1+2*ROUND(2 * p.rating) / 2))) -
+	CASE WHEN a.price < 1 THEN 10000 ELSE 10000 * a.price END -
+	CASE WHEN CAST(TRIM(REPLACE(p.price, '$', '')) AS numeric) < 1 THEN 10000 ELSE 10000 * CAST(TRIM(REPLACE(p.price, '$', '')) AS numeric) END -
+	1000 * 
+	CASE WHEN 12*(1+2*a.rating) > 12*(1+2*ROUND(2 * p.rating) / 2) THEN 12*(1+2*a.rating)
+	ELSE 12*(1+2*ROUND(2 * p.rating) / 2) END AS total_expected_profit
+FROM app_store_apps AS a
+INNER JOIN play_store_apps AS p
+ON a.name = p.name
+ORDER BY total_expected_profit DESC;    /*Runs good*/
+************************************************************
