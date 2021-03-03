@@ -241,7 +241,7 @@ INNER JOIN play_store_apps AS g
 Using (name)
 ORDER BY expected_profit DESC;
 
---Pulling my genre code from earlier and using new profit formula. Gonna try out Josh's CTE
+--Pulling my genre code from earlier and using new profit formula. Gonna try out Josh's CTE. THIS IS WITH SUM
 WITH a AS(
 	SELECT name,
 			price,
@@ -292,65 +292,76 @@ SELECT 'Apple Store' AS store, genre,
 	GROUP BY genre
 	ORDER BY expected_profit DESC;
 
---Trying to drill down to Apps 
+--Genre by AVG PROFIT 
 WITH a AS(
-	SELECT name,
-			price,
-			rating,
-			primary_genre AS genre,
-			CAST(review_count AS int) AS review_count,
-			CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
-			ELSE 1500*(12*(1+2*rating)) - 10000 * price END AS expected_profit
+	SELECT primary_genre,
+		ROUND(AVG(CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+	ELSE 1500*(12*(1+2*rating)) - 10000 * price END),0) apple_expected_profit
 	FROM app_store_apps
-	),
+	GROUP BY primary_genre
+		HAVING COUNT(name) >100
+	ORDER BY apple_expected_profit DESC
+	LIMIT 10),
 	
-	p AS(
-	SELECT c.name AS name,
-			c.clean_price AS price,
-			c.clean_rating AS rating,
-			c.genres AS genre,
-			c.review_count AS review_count,
-			CASE WHEN c.clean_price < 1 THEN 1500*(12*(1+2*c.clean_rating)) - 10000 
-			ELSE 1500*(12*(1+2*c.clean_rating)) - 10000 * c.clean_price
-			END as expected_profit
-	FROM
-		(SELECT name,
-	 			CAST(TRIM(REPLACE(price, '$', '')) AS numeric(5,2)) AS clean_price,
-	 			COALESCE(ROUND(ROUND(2*rating,0)/2,1),0) AS clean_rating,
-		 		genres,
-	 			review_count
-		FROM play_store_apps
-		) AS c
-	),
+	g AS(
+	SELECT genres,
+		ROUND(AVG(CASE WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric(5,2)) < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+	ELSE 1500*(12*(1+2*rating)) - 10000 * CAST(TRIM(REPLACE(price, '$', '')) AS numeric(5,2)) END),0) google_expected_profit
+	FROM play_store_apps
+	GROUP BY genres
+		HAVING COUNT(name) >100
+	ORDER BY google_expected_profit DESC
+	LIMIT 10)
 	
-	top_genres AS (
-	SELECT 'Apple Store' AS store, genre,
-		SUM(expected_profit) as expected_profit
-	FROM a
-	GROUP BY genre
-
-	UNION ALL
-
-	SELECT 'Google Play' AS store, genre,
-		SUM(expected_profit) as expected_profit
-	FROM p
-	GROUP BY genre
+SELECT 'Apple Store' AS Store,primary_genre,
+		ROUND(AVG(CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+	ELSE 1500*(12*(1+2*rating)) - 10000 * price END),0) expected_profit
+	FROM app_store_apps
+	GROUP BY primary_genre
+		HAVING COUNT(name) >100
+UNION ALL
+SELECT 'Google Store' AS Store,genres,
+		ROUND(AVG(CASE WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric(5,2)) < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+	ELSE 1500*(12*(1+2*rating)) - 10000 * CAST(TRIM(REPLACE(price, '$', '')) AS numeric(5,2)) END),0) expected_profit
+	FROM play_store_apps
+	GROUP BY genres
+		HAVING COUNT(name) >100
 	ORDER BY expected_profit DESC
-	LIMIT 20)
-
---can't seem to get my rank to work. Ryan's code is structured differently, need to adjust mine.
-SELECT distinct a.name, a.genre,
-		a.expected_profit + p.expected_profit + 1000*(12*(1+2*least(a.rating,p.rating))) AS total_exp_profit,
-		ROW_NUMBER() OVER(PARTITION BY a.genre ORDER BY total_exp_profit DESC)
-FROM a
-INNER JOIN p
-USING (name)
-WHERE a.genre IN(
-	SELECT genre
-	FROM top_genres
+	LIMIT 100
+/*
+SELECT name, primary_genre, ROUND((CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+	ELSE 1500*(12*(1+2*rating)) - 10000 * price END),0) apple_expected_profit
+FROM app_store_apps
+WHERE primary_genre IN (SELECT primary_genre
+					   FROM a)
+UNION ALL
+SELECT name, genres, ROUND((CASE WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric(5,2)) < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+	ELSE 1500*(12*(1+2*rating)) - 10000 * CAST(TRIM(REPLACE(price, '$', '')) AS numeric(5,2)) END),0) google_expected_profit
+FROM play_store_apps
+WHERE genres IN (SELECT genres
+					   FROM g);					   
+*/
+--Retrying the ranking differently, the above code seems to not work well. Not working at all!
+WITH p AS(
+	SELECT name, primary_genre,
+	CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+	ELSE 1500*(12*(1+2*rating)) - 10000 * price END as expected_profit
+	FROM app_store_apps
+	WHERE name IN 
+		(SELECT name
+		FROM app_store_apps
+		INTERSECT
+		SELECT name
+		FROM play_store_apps)
+	ORDER BY expected_profit DESC),
+r AS(
+	SELECT name, primary_genre, expected_profit, ROW_NUMBER() OVER(PARTITION BY primary_genre ORDER BY expected_profit DESC) AS profit_rank
+	FROM p
+	GROUP BY name, primary_genre, expected_profit
 	)
-OR p.genre IN(
-	SELECT genre
-	FROM top_genres
-	)
-ORDER BY total_exp_profit DESC;
+SELECT p.name, p.primary_genre, r.expected_profit, r.profit_rank
+FROM p
+INNER JOIN r
+ON p.name = r.name
+WHERE profit_rank <=3
+ORDER BY primary_genre, profit_rank;
