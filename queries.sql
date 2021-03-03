@@ -73,7 +73,7 @@ FROM play_store_apps
 GROUP BY content_rating
 ORDER BY avg_expected_profit DESC;
 
--- app store
+-- expected profit by content rating app store
 SELECT content_rating, COUNT(content_rating), AVG(rating) AS avg_rating, AVG(
 CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
 ELSE 1500*(12*(1+2*rating)) - 10000 * price END) as avg_expected_profit
@@ -87,7 +87,7 @@ WHERE name IN
 GROUP BY content_rating
 ORDER BY avg_expected_profit DESC;
 
--- google store
+-- expected profit by content rating google store
 SELECT content_rating, COUNT(content_rating), AVG(rating), AVG(
 CASE WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) < 1 THEN 1500*(12*(1+2*CAST(rating AS numeric))) - 10000
 WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) >= 1 THEN 1500*(12*(1+2*CAST(rating AS numeric))) - 10000 * CAST(TRIM(REPLACE(price, '$', '')) AS numeric) END) as avg_expected_profit
@@ -330,7 +330,7 @@ WITH p AS(
 		FROM play_store_apps)
 	ORDER BY expected_profit DESC),
 r AS(
-	SELECT name, content_rating, expected_profit, review_count, ROW_NUMBER() OVER(PARTITION BY content_rating ORDER BY expected_profit DESC, review_count DESC) AS profit_rank
+	SELECT name, content_rating, expected_profit, review_count, ROW_NUMBER() OVER(PARTITION BY content_rating ORDER BY expected_profit DESC, CAST(review_count AS numeric) DESC) AS profit_rank
 	FROM p
 	GROUP BY name, content_rating, expected_profit, review_count)
 SELECT p.name, p.content_rating, r.expected_profit, r.profit_rank, p.review_count
@@ -338,11 +338,11 @@ FROM p
 INNER JOIN r
 ON p.name = r.name
 WHERE profit_rank <=3
-ORDER BY content_rating, profit_rank, review_count DESC;
+ORDER BY content_rating, profit_rank, CAST(p.review_count AS numeric) DESC;
 
 --recreate for play
 WITH p AS(
-	SELECT name, content_rating,
+	SELECT DISTINCT name, content_rating, review_count,
 	CASE WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) < 1 THEN 1500*(12*(1+2*CAST(ROUND(2 * rating) / 2 AS numeric))) - 10000
 	WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) >= 1 THEN 1500*(12*(1+2*CAST(ROUND(2 * rating) / 2 AS numeric))) - 10000 * CAST(TRIM(REPLACE(price, '$', '')) AS numeric) END as expected_profit
 	FROM play_store_apps
@@ -354,12 +354,16 @@ WITH p AS(
 		FROM play_store_apps)
 	ORDER BY expected_profit DESC),
 r AS(
-	SELECT name, content_rating, expected_profit, ROW_NUMBER() OVER(PARTITION BY content_rating ORDER BY expected_profit DESC) AS profit_rank
+	SELECT DISTINCT name, content_rating, expected_profit, review_count, ROW_NUMBER() OVER(PARTITION BY content_rating ORDER BY expected_profit DESC, review_count DESC) AS profit_rank
 	FROM p
-	GROUP BY name, content_rating, expected_profit)
-SELECT p.name, p.content_rating, r.expected_profit, r.profit_rank
+	GROUP BY name, content_rating, expected_profit, review_count)
+SELECT p.name, p.content_rating, r.expected_profit, r.profit_rank, r.review_count
 FROM p
 INNER JOIN r
 ON p.name = r.name
-WHERE profit_rank <=3
-ORDER BY content_rating, profit_rank;
+WHERE profit_rank <=10
+ORDER BY content_rating, profit_rank, r.review_count DESC;
+
+SELECT *
+FROM app_store_apps
+WHERE name = 'H*nest Meditation'
