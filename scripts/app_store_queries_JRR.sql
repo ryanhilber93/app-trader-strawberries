@@ -1,3 +1,5 @@
+--Data Exploration and Query Preparation----------------------------------------------------------------------------
+
 --General reference
 SELECT *
 FROM app_store_apps;
@@ -24,7 +26,17 @@ SELECT name,
 		primary_genre
 FROM app_store_apps;
 
+--Duplication Investigation
+SELECT name,
+		COUNT(name) AS name_count
+FROM play_store_apps
+GROUP BY name
+ORDER BY name_count DESC;
 
+--Rounding play_store_app ratings to half-values
+SELECT rating,
+		ROUND(2*rating,0)/2 AS clean_rating
+FROM play_store_apps;
 
 --Expected profit for play_store_apps (Ryan Hilber)
 SELECT c.name, c.cleaned_price AS clean_price, c.rating, c.review_count,
@@ -59,45 +71,7 @@ FROM app_store_apps
 GROUP BY price
 ORDER BY price DESC;
 
---expected profit by price and count for app_store_apps (no bins)
-SELECT price,
-		COUNT(price) AS frequency,
-		AVG(
-			CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
-		ELSE 1500*(12*(1+2*rating)) - 10000 * price END
-			) AS avg_expected_profit
-FROM app_store_apps
-GROUP BY price
-ORDER BY price DESC;
-
---expected profit by price and count for play_store_apps (no bins)
-
-SELECT c.cleaned_price AS clean_price, 
-		COUNT(c.cleaned_price) AS frequency,
-		AVG(
-			CASE WHEN c.cleaned_price < 1 THEN 1500*(12*(1+2*c.rating)) - 10000 
-			ELSE 1500*(12*(1+2*c.rating)) - 10000 * c.cleaned_price END
-			) AS avg_expected_profit
-FROM
-	(SELECT name,
-	 		CAST(TRIM(REPLACE(price, '$', '')) AS numeric(5,2)) AS cleaned_price,
-	 		rating
-	FROM play_store_apps
-	WHERE rating IS NOT NULL) AS c
-GROUP BY clean_price
-ORDER BY clean_price DESC;
-
---Duplication Investigation
-SELECT name,
-		COUNT(name) AS name_count
-FROM play_store_apps
-GROUP BY name
-ORDER BY name_count DESC;
-
---Rounding play_store_app ratings to half-values
-SELECT rating,
-		ROUND(2*rating,0)/2 AS clean_rating
-FROM play_store_apps;
+--BOTTOM LINE: Top Apps According to Expected Profit
 
 --Top Apps Common to Both Stores
 
@@ -221,6 +195,38 @@ WHERE name NOT IN(
 		SELECT name
 		FROM a)
 ORDER BY expected_profit DESC, review_count DESC;
+
+--Expected Profit by Price Investigations------------------------------------------------------------------------------
+
+--expected profit by price and count for app_store_apps (no bins)
+SELECT price,
+		COUNT(price) AS frequency,
+		AVG(
+			CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
+		ELSE 1500*(12*(1+2*rating)) - 10000 * price END
+			) AS avg_expected_profit
+FROM app_store_apps
+GROUP BY price
+ORDER BY price DESC;
+
+--expected profit by price and count for play_store_apps (no bins)
+
+SELECT c.cleaned_price AS clean_price, 
+		COUNT(c.cleaned_price) AS frequency,
+		AVG(
+			CASE WHEN c.cleaned_price < 1 THEN 1500*(12*(1+2*c.rating)) - 10000 
+			ELSE 1500*(12*(1+2*c.rating)) - 10000 * c.cleaned_price END
+			) AS avg_expected_profit
+FROM
+	(SELECT name,
+	 		CAST(TRIM(REPLACE(price, '$', '')) AS numeric(5,2)) AS cleaned_price,
+	 		rating
+	FROM play_store_apps
+	WHERE rating IS NOT NULL) AS c
+GROUP BY clean_price
+ORDER BY clean_price DESC;
+
+--Top Price Ranges by Store & for Apps Common to Both Stores-----------------------------------------------------------
 
 --Top Price Ranges for App Store
 
@@ -402,55 +408,6 @@ SELECT name,
 FROM r
 WHERE rank_in_range <= 3;
 	
-------------------------------------------------------------------------------
-
-
-
---AVG Expected Profit by Content Rating (Ryan Hilber)
-
--- compare based on content rating (1b from slides)
--- app store
-SELECT content_rating, COUNT(content_rating), AVG(
-CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
-ELSE 1500*(12*(1+2*rating)) - 10000 * price END) as avg_expected_profit
-FROM app_store_apps
-GROUP BY content_rating
-ORDER BY avg_expected_profit DESC;
-
--- google store
-SELECT content_rating, COUNT(content_rating), AVG(
-CASE WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) < 1 THEN 1500*(12*(1+2*CAST(rating AS numeric))) - 10000
-WHEN CAST(TRIM(REPLACE(price, '$', '')) AS numeric) >= 1 THEN 1500*(12*(1+2*CAST(rating AS numeric))) - 10000 * CAST(TRIM(REPLACE(price, '$', '')) AS numeric) END) as avg_expected_profit
-FROM play_store_apps
-GROUP BY content_rating
-ORDER BY avg_expected_profit DESC;
-
---Highest expected profit among apps common to both stores (v1)
-SELECT name, price, rating, primary_genre, CAST(review_count AS numeric) AS cleaned_review_count,
-CASE WHEN price < 1 THEN 1500*(12*(1+2*rating)) - 10000 
-ELSE 1500*(12*(1+2*rating)) - 10000 * price END as expected_profit
-FROM app_store_apps
-WHERE name IN 
-	(SELECT name
-	FROM app_store_apps
-	INTERSECT
-	SELECT name
-	FROM play_store_apps)
-ORDER BY expected_profit DESC, cleaned_review_count DESC;
-
---Highest expected profit among apps common to both stores (v2)
-
-SELECT DISTINCT a.name,
-(CAST(a.review_count AS numeric) + p.review_count) AS total_review_count,
-(2500*(12*(1+2*a.rating)) + 2500*(12*(1+2*ROUND(2 * p.rating) / 2))) -
-	CASE WHEN a.price < 1 THEN 10000 ELSE 10000 * a.price END -
-	CASE WHEN CAST(TRIM(REPLACE(p.price, '$', '')) AS numeric) < 1 THEN 10000 ELSE 10000 * CAST(TRIM(REPLACE(p.price, '$', '')) AS numeric) END -
-	1000 * 
-	CASE WHEN 12*(1+2*a.rating) > 12*(1+2*ROUND(2 * p.rating) / 2) THEN 12*(1+2*a.rating)
-	ELSE 12*(1+2*ROUND(2 * p.rating) / 2) END AS total_expected_profit
-FROM app_store_apps AS a
-INNER JOIN play_store_apps AS p
-ON a.name = p.name
-ORDER BY total_expected_profit DESC;
+----------------------------------------------------------------------------------------------------------------------
 
 
