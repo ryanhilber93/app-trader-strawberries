@@ -119,6 +119,8 @@ p AS(
 	GROUP BY name, price, rating, genre, expected_profit
 	)
 SELECT a.name,
+		a.price,
+		p.price,
 		a.genre,
 		a.review_count + p.review_count AS total_review_count,
 		a.expected_profit + p.expected_profit + 1000*(12*(1+2*least(a.rating,p.rating))) AS total_exp_profit
@@ -390,6 +392,7 @@ p AS(
 	),
 r AS (
 	SELECT name,
+		p.review_count,
 		price_range,
 		AVG(a.expected_profit + p.expected_profit + 1000*(12*(1+2*least(a.rating,p.rating)))) AS avg_exp_profit,
 		RANK() OVER(PARTITION BY price_range 
@@ -398,13 +401,14 @@ r AS (
 	FROM a
 	INNER JOIN p
 	USING (name, price, price_range)
-	GROUP BY name, price_range
+	GROUP BY name, price_range, p.review_count
 	ORDER BY avg_exp_profit DESC
 	)
 SELECT name,
 		price_range,
 		avg_exp_profit,
-		rank_in_range
+		rank_in_range,
+		review_count
 FROM r
 WHERE rank_in_range <= 3;
 	
